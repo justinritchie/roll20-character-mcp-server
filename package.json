@@ -1,0 +1,30 @@
+{
+  "name": "roll20-character-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server that reads a Roll20 D&D character sheet (and other campaign data) directly from Roll20's Firebase Realtime Database",
+  "type": "module",
+  "bin": {
+    "roll20-character-mcp-server": "build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x build/index.js",
+    "watch": "tsc --watch",
+    "start": "node build/index.js",
+    "inspector": "npx @modelcontextprotocol/inspector node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
