@@ -34,7 +34,16 @@ npm install
 npm run build
 ```
 
-Then run with the four required env vars:
+Configuration is resolved in this order (later wins):
+
+1. **`~/.mcp-credentials/roll20.json`** — written by [mcp-auth-bridge](https://github.com/justinritchie/mcp-auth-bridge) (recommended)
+2. Environment variables — for CI / direct invocation
+
+### Recommended: mcp-auth-bridge
+
+Install [mcp-auth-bridge](https://github.com/justinritchie/mcp-auth-bridge) once. After that, every time your Roll20 ID token expires (~hourly), open the bridge popup while you have a Roll20 tab in front and click **Save Roll20**. It mints a fresh Firebase ID token, reads the campaign + player + character IDs from the page, and writes `~/.mcp-credentials/roll20.json`. The MCP server picks up the new file on the next tool call — no restart, no env-var juggling. This is what keeps your AI in the campaign while you're actually playing.
+
+### Alternative: env vars
 
 ```bash
 ROLL20_FIREBASE_DB_URL=https://roll20-99957.firebaseio.com \
@@ -47,9 +56,7 @@ node build/index.js
 
 `ROLL20_DEFAULT_CHARACTER_ID` and `ROLL20_PLAYER_ID` are optional — without them, character-scoped tools require an explicit `characterId` argument.
 
-## Getting the Config Values
-
-Open your campaign editor in Chrome, open DevTools, paste this in the Console:
+To grab the values manually (one-time, if you don't want the bridge), open your campaign editor in Chrome, open DevTools, and paste this in the Console:
 
 ```js
 (async () => {
@@ -59,20 +66,17 @@ Open your campaign editor in Chrome, open DevTools, paste this in the Console:
     ROLL20_FIREBASE_ID_TOKEN: await u.getIdToken(),
     ROLL20_CAMPAIGN_PATH: window.campaign_storage_path,
     ROLL20_PLAYER_ID: window.d20_player_id,
-    // Find your character id from window.Campaign.characters
   });
 })();
 ```
 
-Find your character ID in the same console:
+Find your character ID:
 
 ```js
 window.Campaign.characters.models
   .filter(m => (m.get('controlledby') || '').includes(window.d20_player_id))
   .map(m => ({ id: m.id, name: m.get('name') }));
 ```
-
-The ID token expires after about an hour. For now, refresh it manually when the server returns 401s.
 
 ## MCP Client Config
 
@@ -114,7 +118,7 @@ ROLL20_FIREBASE_DB_URL=... [...] npm run inspector
 
 ## Architecture Notes
 
-**Auth.** The Firebase ID token is a 1-hour JWT minted by `signInWithCustomToken` from a custom token Roll20 issues server-side from your session cookie. The roadmap is to integrate with [`mcp-auth-bridge`](../mcp-auth-bridge) — capture the Roll20 session cookie via Chrome extension, and have a small token-refresh service mint and refresh ID tokens as needed.
+**Auth.** The Firebase ID token is a 1-hour JWT minted by `signInWithCustomToken` from a custom token Roll20 issues server-side from your session cookie. The server reads it from `~/.mcp-credentials/roll20.json`, written by [mcp-auth-bridge](https://github.com/justinritchie/mcp-auth-bridge) when you click **Save Roll20** in the popup. The bridge runs an on-demand script in the page's MAIN world that calls `firebase.auth().currentUser.getIdToken()` and reads `campaign_storage_path` / `d20_player_id` / `FIREBASE_ROOT` from window globals. Token expires hourly → click Save again. No code change in this server is needed when the credential file refreshes.
 
 **Beacon vs. legacy sheets.** This server assumes the Beacon engine (`charactersheetname: dnd2024byroll20`). Legacy 5e sheets store data as flat `attribs` (hundreds of name/current/max rows) instead of one `store` blob. Adding a legacy code path would be straightforward — branch on `charactersheetname` in `getStore`.
 
@@ -129,12 +133,26 @@ ROLL20_FIREBASE_DB_URL=... [...] npm run inspector
 
 Several paths return 401 (rules-restricted): `/char/{id}`, `/sheet-data`, the campaign root.
 
-## Known Issues / Follow-ups
+## Roadmap
 
-- `search_chat type=rollresult` filter currently misses recent rolls — the lexical sort of Firebase push IDs over the full ID list is the bottleneck; should switch to `orderBy=$key&limitToLast=N` REST params.
-- `get_combat_state` reports "Exhaustion: active" when no exhaustion is present — the exhaustion integrant is always `_enabled` with level elsewhere; needs a level check.
-- ID token expiry is unhandled. Add a 401-on-read → refresh path once we wire up the auth bridge.
-- Writes are intentionally not implemented (see above).
+**The point of this server is to let the AI play alongside you at the table.** That's why the auth path is designed for "click once at start of session, click again when the token expires" rather than "paste a fresh JWT into a config every hour."
+
+**Done**
+- 13 read tools covering character summary, combat state, spells, attacks, features, inventory, currencies, plus campaign-wide handouts and chat search.
+- Beacon (D&D 2024 / `dnd2024byroll20`) sheet support with full integrant decoding.
+- Legacy `ogl5e` fallback via `roll20_get_raw_attributes` — works on every sheet type, including DM-built NPCs.
+- One-call bulk reads (campaign-wide listing in ~180ms; handout search in ~70ms).
+- **mcp-auth-bridge integration** — `~/.mcp-credentials/roll20.json` is the canonical config source. Click Save Roll20 in the bridge popup whenever the token expires (hourly), and the MCP keeps reading without restart. This is what makes "the AI plays with you" actually viable — no friction, no env-var refreshes.
+
+**Planned**
+- Token-expiry detection in the MCP itself: when a Firebase REST call returns 401, surface a clean message ("token expired — click Save Roll20 in the bridge popup") instead of opaque errors.
+- Computed max-HP for Beacon characters (currently only `currentHP` is surfaced; max is derived from the per-level Hit Points integrant formulas).
+- Tighter conditions/exhaustion filtering in `get_combat_state` (the exhaustion integrant is always `_enabled` regardless of level).
+- An optional companion read tool tuned for NPC stat blocks on legacy sheets — wraps the raw-attribute reader with hand-picked fields (HP/AC/saves/known spells/repeating actions) so the LLM doesn't have to navigate the flat-attrib graveyard.
+- Open5e MCP companion server (separate repo) — the AI reads your sheet here, looks up rules there.
+
+**Out of scope (deliberately)**
+- Writes. The Beacon `store` blob has shape validators and an `updateId`/`sheetVersion` change-tracking pair; blind writes risk bricking the sheet. The intended workflow is "MCP reads, AI advises, you click in Roll20."
 
 ## License
 
