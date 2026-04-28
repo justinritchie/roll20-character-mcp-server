@@ -196,10 +196,11 @@ export async function listSpells(
   ctx: { defaultCharacterId?: string },
 ) {
   const id = resolveCharacterId(input, ctx.defaultCharacterId);
-  const [grid, integrants] = await Promise.all([
-    client.getSpellsDisplayOrder(id),
-    client.getIntegrants(id),
-  ]);
+  // Iterate `integrants` directly — `store.spells.displayOrder` is a UI-ordering
+  // hint that is INCOMPLETE on Beacon sheets (notably for Warlocks): it omits
+  // cantrips and Mystic Arcanum (level 6+) spells and sometimes whole levels.
+  // The integrant map is the authoritative store of every spell on the sheet.
+  const integrants = await client.getIntegrants(id);
 
   const rows: {
     level: number;
@@ -213,26 +214,28 @@ export async function listSpells(
     ritual?: boolean;
   }[] = [];
 
-  grid.forEach((uids, level) => {
-    if (input.level !== undefined && input.level !== level) return;
-    for (const uid of uids) {
-      const sp = integrants[uid];
-      if (!sp || sp.type !== "Spell") continue;
-      const prepared = !!sp._prepared || !!sp.alwaysPrepared;
-      if (input.preparedOnly && !prepared) continue;
-      rows.push({
-        level,
-        name: sp.name ?? "(unnamed)",
-        uid,
-        school: sp.school,
-        prepared,
-        alwaysPrepared: !!sp.alwaysPrepared,
-        castingTime: sp.castingTime,
-        range: sp.range,
-        ritual: !!sp.ritual,
-      });
-    }
-  });
+  for (const [uid, sp] of Object.entries(integrants)) {
+    if (!sp || sp.type !== "Spell") continue;
+    const lvl = typeof sp.level === "number" ? sp.level : Number(sp.level);
+    if (!Number.isFinite(lvl)) continue;
+    if (input.level !== undefined && input.level !== lvl) continue;
+    const prepared = !!sp._prepared || !!sp.alwaysPrepared;
+    if (input.preparedOnly && !prepared) continue;
+    rows.push({
+      level: lvl,
+      name: sp.name ?? "(unnamed)",
+      uid,
+      school: sp.school,
+      prepared,
+      alwaysPrepared: !!sp.alwaysPrepared,
+      castingTime: sp.castingTime,
+      range: sp.range,
+      ritual: !!sp.ritual,
+    });
+  }
+
+  // Stable order: by level ASC, then alphabetical by name within each level.
+  rows.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 
   const groupedText = [...new Set(rows.map((r) => r.level))]
     .sort((a, b) => a - b)
