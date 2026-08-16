@@ -347,6 +347,162 @@ export class FirebaseRestClient {
     arr.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
     return arr;
   }
+
+  // ─── world-tools methods (added by apply_patch) ───
+// ─── Pages ─────────────────────────────────────────────────────────────
+
+  /** List all pages in the campaign. Single REST call. */
+  async listPages(): Promise<PageRecord[]> {
+    const all = await this.get<Record<string, PageRecord> | null>(
+      this.campaignPath("pages"),
+    );
+    if (!all) return [];
+    return Object.entries(all).map(([id, rec]) => ({ ...rec, id }));
+  }
+
+  async getPage(pageId: string): Promise<PageRecord | null> {
+    try {
+      const r = await this.get<PageRecord>(this.campaignPath("pages", pageId));
+      return r ? { ...r, id: pageId } : null;
+    } catch (e) {
+      if (e instanceof Roll20RestError && e.status === 401) return null;
+      throw e;
+    }
+  }
+
+  /** Read the active player-facing page id from campaign settings. */
+  async getActivePageId(): Promise<string | null> {
+    try {
+      // Roll20 stores this on the /campaign root as `playerpageid`
+      const v = await this.get<string | null>(
+        this.campaignPath("campaign", "playerpageid"),
+      );
+      return typeof v === "string" ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ─── Tokens (page-scoped) ──────────────────────────────────────────────
+
+  /** List tokens on a page. Tokens live under pages/<pageId>/objgraphic.
+   *  We tag each with page_id for downstream context. */
+  async listTokens(pageId: string): Promise<TokenRecord[]> {
+    const all = await this.get<Record<string, TokenRecord> | null>(
+      this.campaignPath("pages", pageId, "objgraphic"),
+    );
+    if (!all) return [];
+    return Object.entries(all).map(([id, rec]) => ({
+      ...rec,
+      id,
+      page_id: pageId,
+    }));
+  }
+
+  async getToken(pageId: string, tokenId: string): Promise<TokenRecord | null> {
+    try {
+      const r = await this.get<TokenRecord>(
+        this.campaignPath("pages", pageId, "objgraphic", tokenId),
+      );
+      return r ? { ...r, id: tokenId, page_id: pageId } : null;
+    } catch (e) {
+      if (e instanceof Roll20RestError && e.status === 401) return null;
+      throw e;
+    }
+  }
+
+  // ─── Initiative tracker ────────────────────────────────────────────────
+
+  /** Read the campaign turnorder. Stored as a JSON string at /campaign/turnorder. */
+  async getInitiative(): Promise<InitiativeEntry[]> {
+    try {
+      const raw = await this.get<string | null>(
+        this.campaignPath("campaign", "turnorder"),
+      );
+      if (!raw || typeof raw !== "string") return [];
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr as InitiativeEntry[];
+    } catch (e) {
+      if (e instanceof Roll20RestError && e.status === 401) return [];
+      // If parsing fails, return empty rather than throwing — turnorder may
+      // legitimately be empty/missing if no encounter is active.
+      return [];
+    }
+  }
+
+  // ─── Players ───────────────────────────────────────────────────────────
+
+  async listPlayers(): Promise<PlayerRecord[]> {
+    const all = await this.get<Record<string, PlayerRecord> | null>(
+      this.campaignPath("players"),
+    );
+    if (!all) return [];
+    return Object.entries(all).map(([id, rec]) => ({ ...rec, id }));
+  }
+}
+
+
+// ─── world-tools types (added by apply_patch) ───
+export interface PageRecord {
+  id: string;
+  name: string;
+  width?: number;        // grid units
+  height?: number;
+  scale_number?: number;
+  scale_units?: string;
+  grid_type?: string;
+  showgrid?: boolean;
+  showlighting?: boolean;
+  background_color?: string;
+  archived?: boolean;
+}
+
+export interface TokenRecord {
+  id: string;
+  name?: string;
+  imgsrc?: string;
+  left?: number;          // pixel position
+  top?: number;
+  width?: number;         // pixel dims
+  height?: number;
+  rotation?: number;
+  layer?: string;         // 'objects' | 'gmlayer' | 'map' | etc.
+  represents?: string;    // characterId this token represents
+  bar1_value?: string | number;
+  bar1_max?: string | number;
+  bar2_value?: string | number;
+  bar2_max?: string | number;
+  bar3_value?: string | number;
+  bar3_max?: string | number;
+  status_markers?: string;  // comma-separated marker names (e.g. "dead,poisoned")
+  tooltip?: string;
+  gmnotes?: string;
+  controlledby?: string;
+  page_id?: string;       // populated by us (Firebase stores tokens nested under page)
+}
+
+export interface PlayerRecord {
+  id: string;
+  d20userid?: string;
+  displayname?: string;
+  color?: string;
+  online?: boolean;
+  lastActive?: number;
+  lastpage?: string;
+  showmacrobar?: boolean;
+  speakingas?: string;    // last speakingAs selection (player or character id)
+  globalvolume?: number;
+}
+
+/** Roll20 stores turnorder as a JSON string at /campaign/turnorder.
+ *  Parse it into structured entries. */
+export interface InitiativeEntry {
+  id: string;            // token id (or "-1" for custom entries)
+  pr: number | string;   // initiative value
+  custom?: string;       // custom name (when id="-1")
+  formula?: string;      // optional auto-roll formula
+  pageid?: string;
 }
 
 export { decode, decodePath };

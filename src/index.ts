@@ -49,6 +49,20 @@ import {
   getHandout,
   searchChat,
 } from "./tools/campaign.js";
+import {
+  ListPagesInput,
+  GetPageInput,
+  ListTokensInput,
+  GetTokenInput,
+  GetInitiativeInput,
+  ListPlayersInput,
+  listPages,
+  getPage,
+  listTokens,
+  getToken,
+  getInitiative,
+  listPlayers,
+} from "./tools/world.js";
 
 // ─── Config ─────────────────────────────────────────────────────────────
 
@@ -194,6 +208,55 @@ const TOOLS: ToolDef[] = [
     inputSchema: SearchChatInput,
     readOnly: true,
     handler: (input) => searchChat(client, input),
+  }),
+  // ─── world-tools registrations (added by apply_patch) ───
+tool({
+    name: "roll20_list_pages",
+    description:
+      "List pages (maps/scenes) in the campaign. Marks the active player page. Use to see what scene the players are looking at, or to find a pageId for list_tokens.",
+    inputSchema: ListPagesInput,
+    readOnly: true,
+    handler: (input) => listPages(client, input),
+  }),
+  tool({
+    name: "roll20_get_page",
+    description:
+      "Get full metadata for a single page: dimensions, grid, lighting, background. Use list_pages first to find pageId.",
+    inputSchema: GetPageInput,
+    readOnly: true,
+    handler: (input) => getPage(client, input),
+  }),
+  tool({
+    name: "roll20_list_tokens",
+    description:
+      "List tokens on a page. Defaults to the currently-active player page. Each token includes name, position (left/top), bar1/2/3 values (typically HP/AC/temp), status markers (poisoned/concentrating/etc.), and whether it represents a character. Filters: layer (objects/gmlayer/map), representsCharacterId, contains (name substring). USE THIS for combat awareness — 'who's on the battlefield, what HP do they have, what conditions are active'.",
+    inputSchema: ListTokensInput,
+    readOnly: true,
+    handler: (input) => listTokens(client, input),
+  }),
+  tool({
+    name: "roll20_get_token",
+    description:
+      "Get full detail for a single token (all bars, GM notes, controlledby, full position/rotation/dimensions). Use list_tokens first to find tokenId + pageId.",
+    inputSchema: GetTokenInput,
+    readOnly: true,
+    handler: (input) => getToken(client, input),
+  }),
+  tool({
+    name: "roll20_get_initiative",
+    description:
+      "Get the initiative tracker (turn order). Returns ordered list of entries with each token's name (looked up from the token's page) and initiative value. The first entry (▶) is whose turn it is. Empty if no encounter is active.",
+    inputSchema: GetInitiativeInput,
+    readOnly: true,
+    handler: (input) => getInitiative(client, input),
+  }),
+  tool({
+    name: "roll20_list_players",
+    description:
+      "List players in the campaign (display name, online status, last active timestamp, color, last page they viewed). Filter onlineOnly=true to see who's currently in the session. Useful for whisper-targeting and 'who's actually here right now'.",
+    inputSchema: ListPlayersInput,
+    readOnly: true,
+    handler: (input) => listPlayers(client, input),
   }),
 ];
 

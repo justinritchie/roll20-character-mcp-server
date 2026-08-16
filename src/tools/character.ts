@@ -349,26 +349,40 @@ export async function listFeatures(
   ctx: { defaultCharacterId?: string },
 ) {
   const id = resolveCharacterId(input, ctx.defaultCharacterId);
-  const [orders, integrants] = await Promise.all([
-    client.getFeaturesDisplayOrders(id),
-    client.getIntegrants(id),
-  ]);
-  const expand = (uids: string[], category: string) =>
-    uids
-      .map((uid) => integrants[uid])
-      .filter(Boolean)
-      .map((i) => ({
-        category,
-        name: i.name ?? "(unnamed)",
-        source: i.source,
-        enabled: i._enabled !== false,
-      }));
-  const rows = [
-    ...expand(orders.classFeatures, "class"),
-    ...expand(orders.feats, "feat"),
-    ...expand(orders.speciesTraits, "species"),
-    ...expand(orders.other, "other"),
-  ];
+  // Iterate integrants directly. The Beacon sheet's `features.*DisplayOrder`
+  // arrays are UI-ordering hints that are INCOMPLETE on real characters — they
+  // miss subclass features earned at higher levels (e.g. Eldritch Hex L10,
+  // Thought Shield L14), the master Mystic Arcanum / Contact Patron features,
+  // item-granted features, custom homebrew, and several invocations on Warlocks.
+  // The integrants map is the authoritative store of every feature on the sheet.
+  const integrants = await client.getIntegrants(id);
+
+  // Map a feature's `source` field to one of our category buckets. Anything that
+  // doesn't fit a canonical bucket (Subclass, Item, Custom, empty, …) lands in
+  // "other" so the response shape stays stable for existing consumers.
+  const categoryFor = (source?: string): string => {
+    switch (source) {
+      case "Class": return "class";
+      case "Feat": return "feat";
+      case "Species": return "species";
+      case "Subclass": return "subclass";
+      case "Item": return "item";
+      case "Custom": return "custom";
+      default: return "other";
+    }
+  };
+
+  const rows = Object.values(integrants)
+    .filter((i) => i.type === "Features")
+    .map((i) => ({
+      category: categoryFor(i.source),
+      name: i.name ?? "(unnamed)",
+      source: i.source,
+      enabled: i._enabled !== false,
+    }))
+    // Stable order: by category, then alphabetical by name within each.
+    .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+
   const text = rows
     .map((r) => `• [${r.category}] ${r.name}${r.source ? ` — ${r.source}` : ""}${r.enabled ? "" : " (disabled)"}`)
     .join("\n");
